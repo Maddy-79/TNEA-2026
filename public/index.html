@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TNEA 2026 Cutoff Analyzer & Choice Builder</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- jsPDF & autoTable for professional PDF table export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+  <!-- Navbar -->
+  <header class="navbar">
+    <div class="nav-brand">
+      <div class="brand-badge">TNEA 2026</div>
+      <h1>Cutoff Analyzer & Seat Matrix</h1>
+    </div>
+    <div class="nav-actions">
+      <div class="round-select-wrapper">
+        <label for="roundSelect">Round:</label>
+        <select id="roundSelect" class="round-dropdown">
+          <option value="1" selected>Round 1</option>
+          <option value="2">Round 2</option>
+          <option value="3">Round 3</option>
+          <option value="4">Round 4</option>
+        </select>
+      </div>
+      <button id="openChoiceBtn" class="choice-btn">
+        <span>Choice List</span>
+        <span id="choiceCount" class="badge-count">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Filter Control Panel -->
+  <section class="control-panel">
+    <div class="filter-group">
+      <label>Community (Select max 2, Default: OC)</label>
+      <div class="community-pills" id="communityPills">
+        <button type="button" class="comm-pill active" data-comm="OC">OC</button>
+        <button type="button" class="comm-pill" data-comm="BC">BC</button>
+        <button type="button" class="comm-pill" data-comm="BCM">BCM</button>
+        <button type="button" class="comm-pill" data-comm="MBC">MBC</button>
+        <button type="button" class="comm-pill" data-comm="SC">SC</button>
+        <button type="button" class="comm-pill" data-comm="SCA">SCA</button>
+        <button type="button" class="comm-pill" data-comm="ST">ST</button>
+      </div>
+    </div>
+
+    <!-- College Dropdown Search with Tag Pills -->
+    <div class="filter-group flex-2 dropdown-container" id="collegeDropdownContainer">
+      <label for="collegeInput">College Name / Code</label>
+      <div class="input-tag-wrapper" id="collegeTagWrapper">
+        <div id="collegeTags" class="tag-container"></div>
+        <input type="text" id="collegeInput" placeholder="Select or type colleges..." autocomplete="off" />
+      </div>
+      <div id="collegeDropdownList" class="custom-dropdown-list hidden"></div>
+    </div>
+
+    <!-- Branch Dropdown Search with Tag Pills -->
+    <div class="filter-group flex-1 dropdown-container" id="branchDropdownContainer">
+      <label for="branchInput">Branch Code / Name</label>
+      <div class="input-tag-wrapper" id="branchTagWrapper">
+        <div id="branchTags" class="tag-container"></div>
+        <input type="text" id="branchInput" placeholder="Select or type branches..." autocomplete="off" />
+      </div>
+      <div id="branchDropdownList" class="custom-dropdown-list hidden"></div>
+    </div>
+  </section>
+
+  <!-- Main Table Section -->
+  <main class="table-container">
+    <table id="cutoffTable">
+      <thead>
+        <tr id="tableHeaderRow">
+          <!-- Dynamically generated headers -->
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <!-- Rows dynamically injected -->
+      </tbody>
+    </table>
+  </main>
+
+  <!-- Pagination Controls -->
+  <div class="pagination-bar">
+    <div class="pagination-left">
+      <label for="pageSizeSelect">Entries per page:</label>
+      <select id="pageSizeSelect">
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="200" selected>200</option>
+        <option value="500">500</option>
+      </select>
+    </div>
+    
+    <div class="pagination-center">
+      <button id="prevPageBtn" class="page-btn">Previous</button>
+      <span id="pageInfo">Page 1 of 18</span>
+      <div class="jump-box">
+        <span>Go to:</span>
+        <input type="number" id="jumpPageInput" min="1" />
+      </div>
+      <button id="nextPageBtn" class="page-btn">Next</button>
+    </div>
+  </div>
+
+  <!-- Choice List Drawer Modal -->
+  <div id="choiceDrawer" class="drawer hidden">
+    <div class="drawer-header">
+      <h2>Your Choice List</h2>
+      <button id="closeChoiceBtn" class="close-btn">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <p class="drawer-hint">Drag and drop items to reorder your choices, or use the arrow buttons.</p>
+      <ul id="choiceListContainer"></ul>
+    </div>
+    <div class="drawer-footer">
+      <button id="clearChoicesBtn" class="btn-danger">Clear All</button>
+      <button id="exportCsvBtn" class="btn-secondary">CSV</button>
+      <button id="exportPdfBtn" class="btn-secondary">PDF</button>
+      <button id="saveJsonBtn" class="btn-secondary">Save</button>
+      <button id="loadJsonBtn" class="btn-primary">Load</button>
+      <input type="file" id="importFileInput" accept=".json,.csv" style="display: none;" />
+    </div>
+  </div>
+  <div id="drawerOverlay" class="overlay hidden"></div>
+
+  <!-- Watermark -->
+  <a href="https://instagram.com/vams.i_madhav_79" target="_blank" rel="noopener noreferrer" class="watermark">
+    <span>Created by</span>
+    <strong>@vams.i_madhav_79</strong>
+  </a>
+
+  <script src="app.js"></script>
+</body>
+</html>
