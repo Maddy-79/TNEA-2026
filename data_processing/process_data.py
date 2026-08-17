@@ -3,6 +3,21 @@ import glob
 import json
 import pandas as pd
 
+def normalize_branch(b):
+    b = str(b).strip().upper()
+    # Normalize common variations of Computer Science & other branches
+    if b in ['CSE', 'COMP SCI', 'COMPUTER SCIENCE AND ENGINEERING']:
+        return 'CS'
+    if b in ['ECE', 'ELECTRONICS & COMMUNICATION']:
+        return 'EC'
+    if b in ['EEE', 'ELECTRICAL AND ELECTRONICS']:
+        return 'EE'
+    if b in ['IT', 'INFORMATION TECHNOLOGY']:
+        return 'IT'
+    if b in ['MECH', 'MECHANICAL']:
+        return 'ME'
+    return b
+
 def main():
     os.makedirs('public', exist_ok=True)
     
@@ -12,131 +27,136 @@ def main():
 
     data_dir = 'data_processing'
     csv_files = sorted(glob.glob(os.path.join(data_dir, '*.csv')), key=lambda x: 'PROVISION' in x.upper())
-    print(f"Ordered CSV files to process: {[os.path.basename(f) for f in csv_files]}")
+    print(f"Ordered CSV files: {[os.path.basename(f) for f in csv_files]}")
     
     if not csv_files:
         raise FileNotFoundError("CRITICAL: No CSV files found in 'data_processing/'.")
 
     master_data = {}
+    communities_list = ["OC", "BC", "BCM", "MBC", "SC", "SCA", "ST"]
 
-    for f in csv_files:
-        filename = os.path.basename(f).upper()
-        print(f"Processing file: {filename}")
+    seat_matrix_file = next((f for f in csv_files if 'PROVISION' not in os.path.basename(f).upper()), None)
+    prov_file = next((f for f in csv_files if 'PROVISION' in os.path.basename(f).upper()), None)
+
+    # --- STEP 1: Parse Seat Matrix (Full Names & Base Structure) ---
+    if seat_matrix_file:
+        print(f"Parsing Seat Matrix: {os.path.basename(seat_matrix_file)}")
         try:
-            df = pd.read_csv(f, encoding='utf-8', on_bad_lines='skip')
-            print(f"Rows found: {len(df)}")
-            if len(df) == 0:
-                continue
-            
-            # --- CASE 1: PROVISIONAL ALLOTMENT FILE ---
-            if 'PROVISION' in filename:
-                df.columns = [str(c).strip().upper() for c in df.columns]
-                c_col = next((c for c in ['COLLEGE CODE', 'INSTITUTE CODE', 'CODE'] if c in df.columns), None)
-                b_col = next((c for c in ['BRANCH CODE', 'COURSE CODE', 'BRANCH'] if c in df.columns), None)
-                comm_col = next((c for c in ['COMMUNITY', 'ALLOTTED COMMUNITY'] if c in df.columns), None)
-                mark_col = next((c for c in ['AGGREGATE MARK', 'MARK', 'CUTOFF'] if c in df.columns), None)
-                rank_col = next((c for c in ['RANK'] if c in df.columns), None)
-                
-                if not c_col or not b_col:
-                    continue
+            df_sm = pd.read_csv(seat_matrix_file, encoding='utf-8', on_bad_lines='skip')
+            for _, row in df_sm.iterrows():
+                try:
+                    vals = [str(v).strip() for v in row.values if pd.notna(v)]
+                    if len(vals) < 4:
+                        continue
+                    c_code = str(row.iloc[0]).strip()
+                    if not c_code.isdigit():
+                        continue
+                    c_name = str(row.iloc[1]).strip()
+                    b_code = normalize_branch(row.iloc[2])
+                    b_name = str(row.iloc[3]).strip()
                     
-                for _, row in df.iterrows():
-                    try:
-                        c_code = str(row[c_col]).strip()
-                        b_code = str(row[b_col]).strip()
-                        if not c_code or c_code == 'NAN' or not b_code or b_code == 'NAN':
-                            continue
-                            
-                        key = f"{c_code}_{b_code}"
-                        if key not in master_data:
-                            master_data[key] = {
-                                "college_code": c_code,
-                                "college_name": f"College {c_code}",
-                                "branch_code": b_code,
-                                "branch_name": f"Branch {b_code}",
-                                "avg_oc_cutoff": 180.0,
-                                "communities": {}
-                            }
-                        
-                        comm = str(row[comm_col]).strip().upper() if comm_col and pd.notna(row[comm_col]) else "OC"
-                        mark = float(row[mark_col]) if mark_col and pd.notna(row[mark_col]) else 180.0
-                        rank = int(float(str(row[rank_col]).replace(',', ''))) if rank_col and pd.notna(row[rank_col]) else 1000
-                        
-                        if comm not in master_data[key]["communities"]:
-                            master_data[key]["communities"][comm] = {
-                                "closing_rank": rank,
-                                "closing_cutoff": mark,
-                                "filled": 1,
-                                "total": 1,
-                                "fill_pct": 100.0
-                            }
-                        else:
-                            existing = master_data[key]["communities"][comm]
-                            existing["filled"] += 1
-                            existing["total"] += 1
-                            if mark < existing["closing_cutoff"]:
-                                existing["closing_cutoff"] = mark
-                            if rank > existing["closing_rank"]:
-                                existing["closing_rank"] = rank
-                    except Exception:
-                        continue
+                    key = f"{c_code}_{b_code}"
+                    communities_data = {
+                        cm: {"closing_rank": 999999, "closing_cutoff": 0.0, "filled": 0, "total": 1, "fill_pct": 0.0} 
+                        for cm in communities_list
+                    }
 
-            # --- CASE 2: SEAT MATRIX FILE ---
-            else:
-                # TNEA Seat Matrix typically has columns: CODE, COLLEGE NAME, BRANCH, BRANCH NAME (or similar index positions)
-                # Let's inspect raw columns, and if they are messy, fallback to positional parsing based on screenshot preview:
-                # Col 0: Code, Col 1: College Name, Col 2: Branch Code, Col 3: Branch Name
-                for idx, row in df.iterrows():
-                    try:
-                        # Convert row values to string list
-                        vals = [str(val).strip() for val in row.values if pd.notna(val)]
-                        if len(vals) < 4:
-                            continue
-                        
-                        # Look for numeric college code pattern or extract from specific columns
-                        potential_code = str(row.iloc[0]).strip()
-                        if not potential_code.isdigit():
-                            # Skip header rows
-                            continue
-                            
-                        c_code = potential_code
-                        c_name = str(row.iloc[1]).strip()
-                        b_code = str(row.iloc[2]).strip()
-                        b_name = str(row.iloc[3]).strip()
-                        
-                        if not c_code or c_code == 'nan' or not b_code or b_code == 'nan':
-                            continue
-                            
-                        key = f"{c_code}_{b_code}"
-                        if key not in master_data:
-                            master_data[key] = {
-                                "college_code": c_code,
-                                "college_name": c_name if c_name and c_name != 'nan' else f"College {c_code}",
-                                "branch_code": b_code,
-                                "branch_name": b_name if b_name and b_name != 'nan' else f"Branch {b_code}",
-                                "avg_oc_cutoff": 180.0,
-                                "communities": {}
-                            }
-                        else:
-                            if c_name and c_name != 'nan':
-                                master_data[key]["college_name"] = c_name
-                            if b_name and b_name != 'nan':
-                                master_data[key]["branch_name"] = b_name
-                    except Exception:
-                        continue
+                    master_data[key] = {
+                        "college_code": c_code,
+                        "college_name": c_name if c_name and c_name != 'nan' else f"College {c_code}",
+                        "branch_code": b_code,
+                        "branch_name": b_name if b_name and b_name != 'nan' else f"Branch {b_code}",
+                        "avg_oc_cutoff": 180.0,
+                        "communities": communities_data
+                    }
+                except Exception:
+                    continue
         except Exception as e:
-            print(f"Error parsing file {filename}: {e}")
+            print(f"Error reading seat matrix: {e}")
+
+    # --- STEP 2: Parse Provisional Allotments ---
+    if prov_file:
+        print(f"Parsing Provisional Allotments: {os.path.basename(prov_file)}")
+        try:
+            df_prov = pd.read_csv(prov_file, encoding='utf-8', on_bad_lines='skip')
+            cols = [str(c).strip().upper() for c in df_prov.columns]
+            
+            c_col = next((c for c in cols if 'COLLEGE' in c and 'CODE' in c), cols[5] if len(cols)>5 else None)
+            b_col = next((c for c in cols if 'BRANCH' in c and 'CODE' in c), cols[6] if len(cols)>6 else None)
+            comm_col = next((c for c in cols if 'COMMUNITY' in c), cols[2] if len(cols)>2 else None)
+            mark_col = next((c for c in cols if 'MARK' in c or 'CUTOFF' in c), cols[3] if len(cols)>3 else None)
+            rank_col = next((c for c in cols if 'RANK' in c), cols[4] if len(cols)>4 else None)
+
+            for _, row in df_prov.iterrows():
+                try:
+                    c_code = str(row[c_col]).strip() if c_col and pd.notna(row[c_col]) else ""
+                    b_raw = str(row[b_col]).strip() if b_col and pd.notna(row[b_col]) else ""
+                    b_code = normalize_branch(b_raw)
+                    
+                    if not c_code or c_code == 'NAN' or not b_code or b_code == 'NAN':
+                        continue
+                    
+                    key = f"{c_code}_{b_code}"
+                    comm = str(row[comm_col]).strip().upper() if comm_col and pd.notna(row[comm_col]) else "OC"
+                    comm = ''.join([c for c in comm if c.isalnum()])
+                    if comm not in communities_list:
+                        comm = "OC"
+
+                    mark = float(row[mark_col]) if mark_col and pd.notna(row[mark_col]) else 180.0
+                    rank = int(float(str(row[rank_col]).replace(',', ''))) if rank_col and pd.notna(row[rank_col]) else 1000
+
+                    if key not in master_data:
+                        master_data[key] = {
+                            "college_code": c_code,
+                            "college_name": f"College {c_code}",
+                            "branch_code": b_code,
+                            "branch_name": f"Branch {b_code}",
+                            "avg_oc_cutoff": 180.0,
+                            "communities": {cm: {"closing_rank": 999999, "closing_cutoff": 0.0, "filled": 0, "total": 1, "fill_pct": 0.0} for cm in communities_list}
+                        }
+
+                    # Update community specific stats
+                    comm_dict = master_data[key]["communities"][comm]
+                    comm_dict["filled"] += 1
+                    comm_dict["total"] = max(comm_dict["total"], comm_dict["filled"])
+                    if rank < comm_dict["closing_rank"]:
+                        comm_dict["closing_rank"] = rank
+                    if comm_dict["closing_cutoff"] == 0.0 or mark > comm_dict["closing_cutoff"]:
+                        comm_dict["closing_cutoff"] = mark
+
+                    # TNEA Merit Rule: Every allotment counts toward general OC merit pool since OC fills first
+                    oc_dict = master_data[key]["communities"]["OC"]
+                    oc_dict["filled"] += 1
+                    oc_dict["total"] = max(oc_dict["total"], oc_dict["filled"])
+                    if rank < oc_dict["closing_rank"]:
+                        oc_dict["closing_rank"] = rank
+                    if oc_dict["closing_cutoff"] == 0.0 or mark > oc_dict["closing_cutoff"]:
+                        oc_dict["closing_cutoff"] = mark
+
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"Error parsing provisional file: {e}")
 
     result = list(master_data.values())
     if not result:
-        raise ValueError("CRITICAL: Zero records successfully compiled from files.")
-
-    print(f"Total unique college-branch records compiled: {len(result)}")
+        raise ValueError("CRITICAL: Zero records compiled.")
 
     for item in result:
+        for comm, data in item["communities"].items():
+            if data["closing_rank"] == 999999:
+                data["closing_rank"] = 0 # Clean up unassigned
+            if data["total"] > 0:
+                data["fill_pct"] = round((data["filled"] / data["total"]) * 100.0, 1)
+        
         oc_data = item["communities"].get("OC")
-        if oc_data:
+        if oc_data and oc_data["closing_cutoff"] > 0:
             item["avg_oc_cutoff"] = oc_data["closing_cutoff"]
+        else:
+            item["avg_oc_cutoff"] = 180.0
+
+    # --- STEP 3: Sort by OC Closing Rank (Rank 1 at the very top) ---
+    result.sort(key=lambda x: x["communities"]["OC"]["closing_rank"] if 0 < x["communities"]["OC"]["closing_rank"] < 999999 else 999999)
 
     chunk_size = 10000
     chunks = [result[i:i + chunk_size] for i in range(0, len(result), chunk_size)]
@@ -148,12 +168,10 @@ def main():
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(chunk, f, separators=(',', ':'))
         manifest.append(filename)
-        print(f"Saved {filename} with {len(chunk)} records.")
 
-    manifest_path = os.path.join('public', 'manifest.json')
-    with open(manifest_path, 'w', encoding='utf-8') as f:
+    with open(os.path.join('public', 'manifest.json'), 'w', encoding='utf-8') as f:
         json.dump(manifest, f)
-    print("Manifest successfully generated.")
+    print("Successfully processed and sorted data chunks.")
 
 if __name__ == '__main__':
     main()
