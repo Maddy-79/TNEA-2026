@@ -6,123 +6,135 @@ import pandas as pd
 def main():
     os.makedirs('public', exist_ok=True)
     
-    # Remove old ghost file if it exists
+    # Remove old obsolete data.json if present
     old_data_json = os.path.join('public', 'data.json')
     if os.path.exists(old_data_json):
         os.remove(old_data_json)
-        print("Removed obsolete data.json")
 
     data_dir = 'data_processing'
     csv_files = glob.glob(os.path.join(data_dir, '*.csv'))
-    print(f"Searching for CSVs in '{data_dir}/'. Found files: {[os.path.basename(f) for f in csv_files]}")
+    print(f"Found CSV files: {[os.path.basename(f) for f in csv_files]}")
     
     if not csv_files:
-        raise FileNotFoundError(f"CRITICAL: No CSV files found in '{data_dir}/'. Please ensure your CSV files are placed there.")
+        raise FileNotFoundError("CRITICAL: No CSV files found in 'data_processing/'.")
 
-    result = []
-    seen = set()
-    
-    communities_list = ["OC", "BC", "BCM", "MBC", "SC", "SCA", "ST"]
+    master_data = {}
 
     for f in csv_files:
-        filename = os.path.basename(f)
+        filename = os.path.basename(f).upper()
         print(f"Processing file: {filename}")
         try:
-            # Read CSV with fallback encoding and error skipping
             df = pd.read_csv(f, encoding='utf-8', errors='ignore', on_bad_lines='skip')
-            print(f"Total rows found in {filename}: {len(df)}")
-            
+            print(f"Rows found: {len(df)}")
             if len(df) == 0:
                 continue
             
-            # Clean column names (strip whitespace, lowercase)
-            df.columns = [str(c).strip() for c in df.columns]
-            col_map = {c.lower(): c for c in df.columns}
+            # Normalize all column headers to uppercase and strip spaces
+            df.columns = [str(c).strip().upper() for c in df.columns]
             
-            def find_col(keywords):
-                for kw in keywords:
-                    for col_low, orig_col in col_map.items():
-                        if kw in col_low:
-                            return orig_col
-                return None
-
-            # Flexible column mapping for TNEA files
-            c_code_col = find_col(['college code', 'col_code', 'institute code', 'code', 's.no'])
-            c_name_col = find_col(['college name', 'col_name', 'name', 'institution'])
-            b_code_col = find_col(['branch code', 'br_code', 'branch', 'course code'])
-            b_name_col = find_col(['branch name', 'br_name', 'course name', 'branch_name'])
-
-            for idx, row in df.iterrows():
-                try:
-                    c_code = str(row[c_code_col]).strip() if c_code_col and pd.notna(row[c_code_col]) else str(idx)
-                    c_name = str(row[c_name_col]).strip() if c_name_col and pd.notna(row[c_name_col]) else "Unknown College"
-                    b_code = str(row[b_code_col]).strip() if b_code_col and pd.notna(row[b_code_col]) else "001"
-                    b_name = str(row[b_name_col]).strip() if b_name_col and pd.notna(row[b_name_col]) else "Branch"
-
-                    # Skip header rows accidentally captured as data
-                    if not c_code or 'college' in c_code.lower() or c_code.lower() == 'nan':
-                        continue
-
-                    row_key = f"{c_code}_{b_code}"
-                    if row_key in seen:
-                        continue
-                    seen.add(row_key)
-
-                    # Extract community data dynamically if available in the row
-                    communities_data = {}
-                    oc_cutoff_vals = []
-
-                    for comm in communities_list:
-                        # Look for columns matching community cutoff or rank
-                        rank_col = find_col([f'{comm.lower()}_rank', f'{comm.lower()} rank', comm.lower()])
-                        cutoff_col = find_col([f'{comm.lower()}_cutoff', f'{comm.lower()} cutoff', f'{comm.lower()}_mark'])
-                        
-                        closing_rank = 1000
-                        closing_cutoff = 180.0
-                        
-                        if rank_col and pd.notna(row.get(rank_col)):
-                            try:
-                                closing_rank = int(float(str(row[rank_col]).replace(',', '')))
-                            except ValueError:
-                                pass
-                                
-                        if cutoff_col and pd.notna(row.get(cutoff_col)):
-                            try:
-                                closing_cutoff = float(str(row[cutoff_col]))
-                                if comm == "OC":
-                                    oc_cutoff_vals.append(closing_cutoff)
-                            except ValueError:
-                                pass
-
-                        communities_data[comm] = {
-                            "closing_rank": closing_rank,
-                            "closing_cutoff": closing_cutoff,
-                            "filled": 10,
-                            "total": 10,
-                            "fill_pct": 100.0
-                        }
-
-                    avg_oc = sum(oc_cutoff_vals) / len(oc_cutoff_vals) if oc_cutoff_vals else 180.0
-
-                    result.append({
-                        "college_code": c_code,
-                        "college_name": c_name,
-                        "branch_code": b_code,
-                        "branch_name": b_name,
-                        "avg_oc_cutoff": round(avg_oc, 2),
-                        "communities": communities_data
-                    })
-                except Exception:
+            # --- CASE 1: PROVISIONAL ALLOTMENT FILE ---
+            if 'PROVISION' in filename or 'APPLN NO' in df.columns:
+                c_col = next((c for c in ['COLLEGE CODE', 'INSTITUTE CODE'] if c in df.columns), None)
+                b_col = next((c for c in ['BRANCH CODE', 'COURSE CODE'] if c in df.columns), None)
+                comm_col = next((c for c in ['COMMUNITY', 'ALLOTTED COMMUNITY'] if c in df.columns), None)
+                mark_col = next((c for c in ['AGGREGATE MARK', 'MARK', 'CUTOFF'] if c in df.columns), None)
+                rank_col = next((c for c in ['RANK'] if c in df.columns), None)
+                
+                if not c_col or not b_col:
+                    print(f"Warning: Missing required columns in {filename}. Skipping.")
                     continue
-        except Exception as file_err:
-            print(f"Error reading file {filename}: {file_err}")
+                    
+                for _, row in df.iterrows():
+                    try:
+                        c_code = str(row[c_col]).strip()
+                        b_code = str(row[b_col]).strip()
+                        if not c_code or c_code == 'NAN' or not b_code or b_code == 'NAN':
+                            continue
+                            
+                        key = f"{c_code}_{b_code}"
+                        if key not in master_data:
+                            master_data[key] = {
+                                "college_code": c_code,
+                                "college_name": f"College {c_code}",
+                                "branch_code": b_code,
+                                "branch_name": f"Branch {b_code}",
+                                "avg_oc_cutoff": 180.0,
+                                "communities": {}
+                            }
+                        
+                        comm = str(row[comm_col]).strip().upper() if comm_col and pd.notna(row[comm_col]) else "OC"
+                        mark = float(row[mark_col]) if mark_col and pd.notna(row[mark_col]) else 180.0
+                        rank = int(float(str(row[rank_col]).replace(',', ''))) if rank_col and pd.notna(row[rank_col]) else 1000
+                        
+                        if comm not in master_data[key]["communities"]:
+                            master_data[key]["communities"][comm] = {
+                                "closing_rank": rank,
+                                "closing_cutoff": mark,
+                                "filled": 1,
+                                "total": 1,
+                                "fill_pct": 100.0
+                            }
+                        else:
+                            existing = master_data[key]["communities"][comm]
+                            existing["filled"] += 1
+                            existing["total"] += 1
+                            if mark < existing["closing_cutoff"]:
+                                existing["closing_cutoff"] = mark
+                            if rank > existing["closing_rank"]:
+                                existing["closing_rank"] = rank
+                    except Exception:
+                        continue
 
+            # --- CASE 2: SEAT MATRIX FILE ---
+            else:
+                c_col = next((c for c in ['CODE', 'COLLEGE CODE', 'S.NO'] if c in df.columns), None)
+                name_col = next((c for c in ['COLLEGE NAME', 'NAME'] if c in df.columns), None)
+                b_code_col = next((c for c in ['BRANCH', 'BRANCH CODE', 'COURSE'] if c in df.columns), None)
+                b_name_col = next((c for c in ['BRANCH NAME', 'COURSE NAME'] if c in df.columns), None)
+                
+                for _, row in df.iterrows():
+                    try:
+                        c_code = str(row[c_col]).strip() if c_col and pd.notna(row[c_col]) else ""
+                        c_name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else "Unknown College"
+                        b_code = str(row[b_code_col]).strip() if b_code_col and pd.notna(row[b_code_col]) else "001"
+                        b_name = str(row[b_name_col]).strip() if b_name_col and pd.notna(row[b_name_col]) else "Branch"
+                        
+                        if not c_code or 'COLLEGE' in c_code.upper() or c_code == 'NAN':
+                            continue
+                            
+                        key = f"{c_code}_{b_code}"
+                        if key not in master_data:
+                            master_data[key] = {
+                                "college_code": c_code,
+                                "college_name": c_name,
+                                "branch_code": b_code,
+                                "branch_name": b_name,
+                                "avg_oc_cutoff": 180.0,
+                                "communities": {}
+                            }
+                        else:
+                            if c_name != "Unknown College":
+                                master_data[key]["college_name"] = c_name
+                            if b_name != "Branch":
+                                master_data[key]["branch_name"] = b_name
+                    except Exception:
+                        continue
+        except Exception as e:
+            print(f"Error parsing file {filename}: {e}")
+
+    result = list(master_data.values())
     if not result:
-        raise ValueError("CRITICAL: Extracted 0 records from your CSV files. Please check column headers.")
+        raise ValueError("CRITICAL: Zero records successfully compiled from files.")
 
-    print(f"Total extracted records successfully: {len(result)}")
+    print(f"Total unique college-branch records compiled: {len(result)}")
 
-    # Split into chunks of 10,000 records to stay safely under Cloudflare limits
+    # Set average OC cutoff values
+    for item in result:
+        oc_data = item["communities"].get("OC")
+        if oc_data:
+            item["avg_oc_cutoff"] = oc_data["closing_cutoff"]
+
+    # Write chunk files (10,000 records per chunk)
     chunk_size = 10000
     chunks = [result[i:i + chunk_size] for i in range(0, len(result), chunk_size)]
     
@@ -132,14 +144,13 @@ def main():
         output_path = os.path.join('public', filename)
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(chunk, f, separators=(',', ':'))
-        size_mb = os.path.getsize(output_path) / (1024 * 1024)
-        print(f"Saved {filename} with {len(chunk)} records ({size_mb:.2f} MiB)")
         manifest.append(filename)
+        print(f"Saved {filename} with {len(chunk)} records.")
 
     manifest_path = os.path.join('public', 'manifest.json')
     with open(manifest_path, 'w', encoding='utf-8') as f:
         json.dump(manifest, f)
-    print(f"Successfully generated manifest with {len(manifest)} parts.")
+    print("Manifest successfully generated.")
 
 if __name__ == '__main__':
     main()
