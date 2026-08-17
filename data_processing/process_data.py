@@ -6,7 +6,7 @@ import pandas as pd
 SEAT_MATRIX_FILE = (
     "GENERAL_ACADEMIC_SEAT_MATRIX_BEFORE_SPECIAL_RESERVATION_COUNSELLING_2026.csv"
 )
-PROVISIONAL_FILE = "PROVSION ROUND 1.csv"  # Merged R1 + R2 provisional CSV
+PROVISIONAL_FILE = "PROVISION ROUND 1.csv"  # Merged R1 + R2 provisional CSV
 OUTPUT_JSON = "../public/data.json"
 
 # 1. Read CSV files and normalize column names
