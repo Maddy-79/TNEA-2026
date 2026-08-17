@@ -22,11 +22,13 @@ const pageSizeSelect = document.getElementById("pageSizeSelect");
 const jumpPageInput = document.getElementById("jumpPageInput");
 const roundSelect = document.getElementById("roundSelect");
 
-// Round Selection Listener
+// Round Selection Listener (Keeps Round 1, 2, 3, 4 dropdown functional)
 if (roundSelect) {
   roundSelect.addEventListener("change", (e) => {
     currentRound = e.target.value;
     console.log("Active TNEA Round switched to:", currentRound);
+    currentPage = 1;
+    renderTable();
   });
 }
 
@@ -53,7 +55,7 @@ async function loadData() {
   }
 }
 
-// Call loadData on startup
+// Run on startup
 loadData();
 
 // 2. Community Pill Logic (Max 2)
@@ -121,7 +123,6 @@ function updateTableHeader() {
 
   tableHeaderRow.innerHTML = headersHtml;
 
-  // Re-attach sort listeners to new headers
   tableHeaderRow.querySelectorAll("th[data-sort]").forEach(th => {
     th.addEventListener("click", () => {
       const col = th.getAttribute("data-sort");
@@ -543,78 +544,3 @@ if (clearChoicesBtn) {
     updateChoiceUI();
   });
 }
-
-// CSV Export
-const exportCsvBtn = document.getElementById("exportCsvBtn");
-if (exportCsvBtn) {
-  exportCsvBtn.addEventListener("click", () => {
-    let csv = "Choice Number,College Code,College Name,Branch Code,Branch Name,Avg OC Cutoff,OC Rank,OC Cutoff,Extra Community,Extra Rank,Extra Cutoff\n";
-    choiceList.forEach((item, idx) => {
-      csv += `${idx + 1},${item.college_code},"${item.college_name}",${item.branch_code},"${item.branch_name}",${item.avg_oc_cutoff},${item.oc_rank},${item.oc_cutoff},${item.extra_comm || ''},${item.extra_rank || ''},${item.extra_cutoff || ''}\n`;
-    });
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "TNEA_Choice_List.csv";
-    a.click();
-  });
-}
-
-// PDF Export
-const exportPdfBtn = document.getElementById("exportPdfBtn");
-if (exportPdfBtn) {
-  exportPdfBtn.addEventListener("click", () => {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF("landscape");
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("TNEA 2026 - Preferred Choice List", 14, 15);
-
-    const tableHeaders = ["S.No", "Code", "College Name", "Branch", "Avg OC Cutoff", "Closing Ranks"];
-    const tableRows = [];
-
-    choiceList.forEach((item, idx) => {
-      let rankStr = `OC: ${item.oc_rank} (${item.oc_cutoff})`;
-      if (item.extra_comm) {
-        rankStr += `\n${item.extra_comm}: ${item.extra_rank} (${item.extra_cutoff})`;
-      }
-
-      tableRows.push([
-        idx + 1,
-        item.college_code,
-        item.college_name,
-        `${item.branch_name} (${item.branch_code})`,
-        item.avg_oc_cutoff,
-        rankStr
-      ]);
-    });
-
-    doc.autoTable({
-      startY: 22,
-      head: [tableHeaders],
-      body: tableRows,
-      theme: "grid",
-      headStyles: { fillColor: [79, 70, 229] },
-      styles: { fontSize: 9, cellPadding: 5 }
-    });
-
-    doc.save("TNEA_Choice_List.pdf");
-  });
-}
-
-// Save JSON Backup
-const saveJsonBtn = document.getElementById("saveJsonBtn");
-if (saveJsonBtn) {
-  saveJsonBtn.addEventListener("click", () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(choiceList, null, 2));
-    const dlAnchor = document.createElement('a');
-    dlAnchor.setAttribute("href", dataStr);
-    dlAnchor.setAttribute("download", "tnea_choices_backup.json");
-    dlAnchor.click();
-  });
-}
-
-// Load JSON/CSV Button Trigger
-const importFileInput = document.getElementById("importFileInput");
