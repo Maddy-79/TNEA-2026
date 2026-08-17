@@ -25,7 +25,6 @@ def main():
             if len(df) == 0:
                 continue
             
-            # Map columns dynamically using lowercase keywords
             col_map = {str(c).strip().lower(): c for c in df.columns}
             
             def find_col(keywords):
@@ -52,7 +51,6 @@ def main():
                     b_code = b_code.strip()
                     b_name = b_name.strip()
 
-                    # Skip header-like rows if duplicated inside data
                     if 'college' in c_code.lower() or 'code' in c_code.lower():
                         continue
 
@@ -79,32 +77,12 @@ def main():
         except Exception as file_err:
             print(f"Error reading file {f}: {file_err}")
 
-    # Fallback: Read raw CSV text lines if dataframe parsing yielded nothing
-    if not result:
-        print("Using raw text fallback reader...")
-        for f in csv_files:
-            try:
-                with open(f, 'r', encoding='utf-8', errors='ignore') as file_obj:
-                    lines = file_obj.readlines()
-                    for idx, line in enumerate(lines[1:]):
-                        parts = [p.strip() for p in line.split(',') if p.strip()]
-                        if len(parts) >= 2:
-                            result.append({
-                                "college_code": parts[0],
-                                "college_name": parts[1],
-                                "branch_code": parts[2] if len(parts) > 2 else "001",
-                                "branch_name": parts[3] if len(parts) > 3 else "Branch",
-                                "avg_oc_cutoff": 180.0,
-                                "communities": {
-                                    "OC": {"closing_rank": 1000, "closing_cutoff": 180.0, "filled": 10, "total": 10, "fill_pct": 100.0}
-                                }
-                            })
-            except Exception as e:
-                print(f"Raw fallback error: {e}")
-
     output_path = os.path.join('public', 'data.json')
+    
+    # Minify JSON by removing indent and whitespace separators to keep file size well below 25 MiB
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(result, f, indent=2)
+        json.dump(result, f, separators=(',', ':'))
+        
     print(f"Successfully generated {output_path} with {len(result)} records.")
 
 if __name__ == '__main__':
