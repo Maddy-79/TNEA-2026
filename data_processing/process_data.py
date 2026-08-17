@@ -34,14 +34,13 @@ def main():
 
     result = []
     if seat_matrix_df is not None:
-        # Standardize column names or handle dynamically
         seat_matrix_df.columns = [c.strip() for c in seat_matrix_df.columns]
         
         for idx, row in seat_matrix_df.iterrows():
             college_code = str(row.get('College Code', row.get('COLLEGE_CODE', row.get('CollegeCode', idx))))
             college_name = str(row.get('College Name', row.get('COLLEGE_NAME', row.get('CollegeName', 'Unknown College'))))
             branch_code = str(row.get('Branch Code', row.get('BRANCH_CODE', row.get('BranchCode', '000'))))
-            branch_name = str(row.get('Branch Name', row.get('BRANCH_NAME', 'BranchName'))))
+            branch_name = str(row.get('Branch Name', row.get('BRANCH_NAME', 'BranchName')))
             
             communities = {}
             for comm in ['OC', 'BC', 'BCM', 'MBC', 'SC', 'SCA', 'ST']:
@@ -61,20 +60,6 @@ def main():
                 "avg_oc_cutoff": float(row.get('Avg_OC', row.get('AVG_OC', 190.0))),
                 "communities": communities
             })
-
-    # Fallback dataset if empty
-    if not result:
-        result.append({
-            "college_code": "1",
-            "college_name": "University Departments of Anna University Chennai",
-            "branch_code": "CS",
-            "branch_name": "COMPUTER SCIENCE AND ENGINEERING",
-            "avg_oc_cutoff": 200.0,
-            "communities": {
-                "OC": {"closing_rank": 44, "closing_cutoff": 200.0, "filled": 20, "total": 20, "fill_pct": 100.0},
-                "BC": {"closing_rank": 100, "closing_cutoff": 198.0, "filled": 15, "total": 15, "fill_pct": 100.0}
-            }
-        })
 
     output_path = os.path.join('public', 'data.json')
     with open(output_path, 'w', encoding='utf-8') as f:
