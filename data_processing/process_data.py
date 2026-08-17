@@ -1,150 +1,130 @@
-import os
-import glob
 import json
+import os
 import pandas as pd
 
-def main():
-    os.makedirs('public', exist_ok=True)
-    
-    old_data_json = os.path.join('public', 'data.json')
-    if os.path.exists(old_data_json):
-        os.remove(old_data_json)
+# File paths
+SEAT_MATRIX_FILE = (
+    "GENERAL_ACADEMIC_SEAT_MATRIX_BEFORE_SPECIAL_RESERVATION_COUNSELLING_2026.csv"
+)
+PROVISIONAL_FILE = "PROVSION ROUND 1.csv"
+OUTPUT_JSON = "../public/data.json"
 
-    data_dir = 'data_processing'
-    csv_files = glob.glob(os.path.join(data_dir, '*.csv'))
-    print(f"Found CSV files: {[os.path.basename(f) for f in csv_files]}")
-    
-    if not csv_files:
-        raise FileNotFoundError("CRITICAL: No CSV files found in 'data_processing/'.")
+# 1. Read CSV files and normalize column names
+df_seat = pd.read_csv(SEAT_MATRIX_FILE)
+df_seat.columns = [c.replace("\n", " ").strip() for c in df_seat.columns]
 
-    master_data = {}
-    communities_list = ["OC", "BC", "BCM", "MBC", "SC", "SCA", "ST"]
+df_prov = pd.read_csv(PROVISIONAL_FILE)
+df_prov.columns = [c.replace("\n", " ").strip() for c in df_prov.columns]
 
-    seat_matrix_file = next((f for f in csv_files if 'PROVISION' not in os.path.basename(f).upper()), None)
-    prov_file = next((f for f in csv_files if 'PROVISION' in os.path.basename(f).upper()), None)
+df_seat = df_seat.dropna(how="all")
+df_prov = df_prov.dropna(how="all")
 
-    # --- STEP 1: Parse Seat Matrix for College & Branch Names ---
-    if seat_matrix_file:
-        print(f"Parsing Seat Matrix: {os.path.basename(seat_matrix_file)}")
-        try:
-            df_sm = pd.read_csv(seat_matrix_file, encoding='utf-8', on_bad_lines='skip')
-            for _, row in df_sm.iterrows():
-                try:
-                    vals = [str(v).strip() for v in row.values if pd.notna(v)]
-                    if len(vals) < 4:
-                        continue
-                    c_code = str(row.iloc[0]).strip()
-                    if not c_code.isdigit():
-                        continue
-                    c_name = str(row.iloc[1]).strip()
-                    b_code = str(row.iloc[2]).strip().upper()
-                    b_name = str(row.iloc[3]).strip()
-                    
-                    key = f"{c_code}_{b_code}"
-                    master_data[key] = {
-                        "college_code": c_code,
-                        "college_name": c_name if c_name and c_name != 'nan' else f"College {c_code}",
-                        "branch_code": b_code,
-                        "branch_name": b_name if b_name and b_name != 'nan' else f"Branch {b_code}",
-                        "avg_oc_cutoff": 180.0,
-                        "communities": {cm: {"closing_rank": 0, "closing_cutoff": 0.0, "filled": 0, "total": 1, "fill_pct": 0.0} for cm in communities_list}
-                    }
-                except Exception:
-                    continue
-        except Exception as e:
-            print(f"Error reading seat matrix: {e}")
+# 2. Standardize data types and clean whitespace
+for col in ["COLLEGE CODE", "BRANCH CODE"]:
+    df_seat[col] = df_seat[col].astype(str).str.strip()
+    df_prov[col] = df_prov[col].astype(str).str.strip()
 
-    # --- STEP 2: Parse Provisional Allotments Strictly from CSV Rows ---
-    if prov_file:
-        print(f"Parsing Provisional Allotments: {os.path.basename(prov_file)}")
-        try:
-            df_prov = pd.read_csv(prov_file, encoding='utf-8', on_bad_lines='skip')
-            cols = [str(c).strip().upper() for c in df_prov.columns]
-            
-            c_col = next((c for c in cols if 'COLLEGE' in c and 'CODE' in c), None)
-            b_col = next((c for c in cols if 'BRANCH' in c and 'CODE' in c), None)
-            comm_col = next((c for c in cols if 'COMMUNITY' in c or 'QUOTA' in c), None)
-            mark_col = next((c for c in cols if 'MARK' in c or 'CUTOFF' in c), None)
-            rank_col = next((c for c in cols if 'RANK' in c), None)
+df_seat["COLLEGE NAME"] = df_seat["COLLEGE NAME"].astype(str).str.strip()
+df_seat["BRANCH NAME"] = df_seat["BRANCH NAME"].astype(str).str.strip()
+df_prov["ALLOTTED COMMUNITY"] = (
+    df_prov["ALLOTTED COMMUNITY"].astype(str).str.strip()
+)
 
-            for _, row in df_prov.iterrows():
-                try:
-                    c_code = str(row[c_col]).strip() if c_col and pd.notna(row[c_col]) else ""
-                    b_code = str(row[b_col]).strip().upper() if b_col and pd.notna(row[b_col]) else ""
-                    if not c_code or c_code == 'NAN' or not b_code or b_code == 'NAN':
-                        continue
-                    
-                    key = f"{c_code}_{b_code}"
-                    
-                    # Read exact community from the CSV row
-                    comm = "OC"
-                    if comm_col and pd.notna(row[comm_col]):
-                        raw_comm = str(row[comm_col]).strip().upper()
-                        raw_comm = ''.join([ch for ch in raw_comm if ch.isalnum()])
-                        if raw_comm in communities_list:
-                            comm = raw_comm
+df_prov["RANK"] = pd.to_numeric(df_prov["RANK"], errors="coerce")
+df_prov["AGGREGATE MARK"] = pd.to_numeric(
+    df_prov["AGGREGATE MARK"], errors="coerce"
+)
 
-                    mark = float(row[mark_col]) if mark_col and pd.notna(row[mark_col]) else 0.0
-                    rank = int(float(str(row[rank_col]).replace(',', ''))) if rank_col and pd.notna(row[rank_col]) else 0
+COMMUNITIES = ["OC", "BC", "BCM", "MBC", "SC", "SCA", "ST"]
+results = []
 
-                    if key not in master_data:
-                        master_data[key] = {
-                            "college_code": c_code,
-                            "college_name": f"College {c_code}",
-                            "branch_code": b_code,
-                            "branch_name": f"Branch {b_code}",
-                            "avg_oc_cutoff": 180.0,
-                            "communities": {cm: {"closing_rank": 0, "closing_cutoff": 0.0, "filled": 0, "total": 1, "fill_pct": 0.0} for cm in communities_list}
-                        }
+for _, row in df_seat.iterrows():
+    c_code = row["COLLEGE CODE"]
+    c_name = row["COLLEGE NAME"]
+    b_code = row["BRANCH CODE"]
+    b_name = row["BRANCH NAME"]
 
-                    comm_dict = master_data[key]["communities"][comm]
-                    comm_dict["filled"] += 1
-                    comm_dict["total"] = max(comm_dict["total"], comm_dict["filled"])
-                    
-                    # Closing rank: maximum rank in the CSV for this community
-                    if rank > comm_dict["closing_rank"]:
-                        comm_dict["closing_rank"] = rank
-                    # Closing cutoff: minimum mark in the CSV for this community
-                    if comm_dict["closing_cutoff"] == 0.0 or (mark > 0 and mark < comm_dict["closing_cutoff"]):
-                        comm_dict["closing_cutoff"] = mark
+    prov_slice = df_prov[
+        (df_prov["COLLEGE CODE"] == c_code)
+        & (df_prov["BRANCH CODE"] == b_code)
+    ]
 
-                except Exception:
-                    continue
-        except Exception as e:
-            print(f"Error parsing provisional file: {e}")
+    oc_students = prov_slice[
+        (prov_slice["ALLOTTED COMMUNITY"] == "OC")
+        & prov_slice["AGGREGATE MARK"].notna()
+    ]
+    avg_oc = (
+        round(float(oc_students["AGGREGATE MARK"].mean()), 2)
+        if not oc_students.empty
+        else None
+    )
 
-    result = list(master_data.values())
-    if not result:
-        raise ValueError("CRITICAL: Zero records compiled.")
+    comm_data = {}
+    total_seats_all = 0
+    total_filled_all = 0
 
-    for item in result:
-        for comm, data in item["communities"].items():
-            if data["total"] > 0:
-                data["fill_pct"] = round((data["filled"] / data["total"]) * 100.0, 1)
-        
-        oc_data = item["communities"].get("OC")
-        if oc_data and oc_data["closing_cutoff"] > 0:
-            item["avg_oc_cutoff"] = oc_data["closing_cutoff"]
+    for comm in COMMUNITIES:
+        total_seats = pd.to_numeric(row.get(comm, 0), errors="coerce")
+        total_seats = int(total_seats) if pd.notna(total_seats) else 0
+
+        comm_allotted = prov_slice[prov_slice["ALLOTTED COMMUNITY"] == comm]
+        filled_seats = len(comm_allotted)
+
+        total_seats_all += total_seats
+        total_filled_all += filled_seats
+
+        valid_allotted = comm_allotted.dropna(
+            subset=["RANK", "AGGREGATE MARK"]
+        ).sort_values(by="RANK")
+
+        if not valid_allotted.empty:
+            last_student = valid_allotted.iloc[-1]
+            closing_rank = int(last_student["RANK"])
+            closing_cutoff = round(float(last_student["AGGREGATE MARK"]), 2)
         else:
-            item["avg_oc_cutoff"] = 180.0
+            closing_rank = None
+            closing_cutoff = None
 
-    # Sort by OC closing rank ascending
-    result.sort(key=lambda x: x["communities"]["OC"]["closing_rank"] if x["communities"]["OC"]["closing_rank"] > 0 else 999999)
+        fill_pct = (
+            round((filled_seats / total_seats) * 100, 1)
+            if total_seats > 0
+            else 0.0
+        )
 
-    chunk_size = 10000
-    chunks = [result[i:i + chunk_size] for i in range(0, len(result), chunk_size)]
-    
-    manifest = []
-    for idx, chunk in enumerate(chunks):
-        filename = f"data_part_{idx + 1}.json"
-        output_path = os.path.join('public', filename)
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(chunk, f, separators=(',', ':'))
-        manifest.append(filename)
+        comm_data[comm] = {
+            "closing_rank": closing_rank,
+            "closing_cutoff": closing_cutoff,
+            "filled": filled_seats,
+            "total": total_seats,
+            "fill_pct": fill_pct,
+        }
 
-    with open(os.path.join('public', 'manifest.json'), 'w', encoding='utf-8') as f:
-        json.dump(manifest, f)
-    print("Successfully processed data chunks strictly from CSV.")
+    total_pct = (
+        round((total_filled_all / total_seats_all) * 100, 1)
+        if total_seats_all > 0
+        else 0.0
+    )
+    comm_data["TOTAL"] = {
+        "closing_rank": None,
+        "closing_cutoff": None,
+        "filled": total_filled_all,
+        "total": total_seats_all,
+        "fill_pct": total_pct,
+    }
 
-if __name__ == '__main__':
-    main()
+    results.append(
+        {
+            "college_code": c_code,
+            "college_name": c_name,
+            "branch_code": b_code,
+            "branch_name": b_name,
+            "avg_oc_cutoff": avg_oc,
+            "communities": comm_data,
+        }
+    )
+
+os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
+with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+    json.dump(results, f, ensure_ascii=False, indent=2)
+
+print(f"Successfully generated {len(results)} branch rows in {OUTPUT_JSON}!")
