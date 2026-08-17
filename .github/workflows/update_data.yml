@@ -1,0 +1,30 @@
+name: Auto Process TNEA Data
+
+on:
+  push:
+    paths:
+    - 'data_processing/**'
+
+jobs:
+  process-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run data processing script
+        run: python data_processing/process_data.py
+
+      - name: Commit and push updated data.json
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add public/data.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update data.json from new CSV" && git push)
