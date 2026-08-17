@@ -6,14 +6,14 @@ import pandas as pd
 def main():
     os.makedirs('public', exist_ok=True)
     
-    # Remove old obsolete data.json if present
     old_data_json = os.path.join('public', 'data.json')
     if os.path.exists(old_data_json):
         os.remove(old_data_json)
 
     data_dir = 'data_processing'
-    csv_files = glob.glob(os.path.join(data_dir, '*.csv'))
-    print(f"Found CSV files: {[os.path.basename(f) for f in csv_files]}")
+    # Sort files so Seat Matrix is processed first, Provisional second
+    csv_files = sorted(glob.glob(os.path.join(data_dir, '*.csv')), key=lambda x: 'PROVISION' in x.upper())
+    print(f"Ordered CSV files to process: {[os.path.basename(f) for f in csv_files]}")
     
     if not csv_files:
         raise FileNotFoundError("CRITICAL: No CSV files found in 'data_processing/'.")
@@ -24,19 +24,17 @@ def main():
         filename = os.path.basename(f).upper()
         print(f"Processing file: {filename}")
         try:
-            # Fixed: removed unsupported 'errors' keyword argument
             df = pd.read_csv(f, encoding='utf-8', on_bad_lines='skip')
             print(f"Rows found: {len(df)}")
             if len(df) == 0:
                 continue
             
-            # Normalize all column headers to uppercase and strip spaces
             df.columns = [str(c).strip().upper() for c in df.columns]
             
             # --- CASE 1: PROVISIONAL ALLOTMENT FILE ---
-            if 'PROVISION' in filename or 'APPLN NO' in df.columns:
-                c_col = next((c for c in ['COLLEGE CODE', 'INSTITUTE CODE'] if c in df.columns), None)
-                b_col = next((c for c in ['BRANCH CODE', 'COURSE CODE'] if c in df.columns), None)
+            if 'PROVISION' in filename:
+                c_col = next((c for c in ['COLLEGE CODE', 'INSTITUTE CODE', 'CODE'] if c in df.columns), None)
+                b_col = next((c for c in ['BRANCH CODE', 'COURSE CODE', 'BRANCH'] if c in df.columns), None)
                 comm_col = next((c for c in ['COMMUNITY', 'ALLOTTED COMMUNITY'] if c in df.columns), None)
                 mark_col = next((c for c in ['AGGREGATE MARK', 'MARK', 'CUTOFF'] if c in df.columns), None)
                 rank_col = next((c for c in ['RANK'] if c in df.columns), None)
@@ -96,9 +94,9 @@ def main():
                 for _, row in df.iterrows():
                     try:
                         c_code = str(row[c_col]).strip() if c_col and pd.notna(row[c_col]) else ""
-                        c_name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else "Unknown College"
-                        b_code = str(row[b_code_col]).strip() if b_code_col and pd.notna(row[b_code_col]) else "001"
-                        b_name = str(row[b_name_col]).strip() if b_name_col and pd.notna(row[b_name_col]) else "Branch"
+                        c_name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else ""
+                        b_code = str(row[b_code_col]).strip() if b_code_col and pd.notna(row[b_code_col]) else ""
+                        b_name = str(row[b_name_col]).strip() if b_name_col and pd.notna(row[b_name_col]) else ""
                         
                         if not c_code or 'COLLEGE' in c_code.upper() or c_code == 'NAN':
                             continue
@@ -107,16 +105,16 @@ def main():
                         if key not in master_data:
                             master_data[key] = {
                                 "college_code": c_code,
-                                "college_name": c_name,
+                                "college_name": c_name if c_name else f"College {c_code}",
                                 "branch_code": b_code,
-                                "branch_name": b_name,
+                                "branch_name": b_name if b_name else f"Branch {b_code}",
                                 "avg_oc_cutoff": 180.0,
                                 "communities": {}
                             }
                         else:
-                            if c_name != "Unknown College":
+                            if c_name and c_name != 'NAN':
                                 master_data[key]["college_name"] = c_name
-                            if b_name != "Branch":
+                            if b_name and b_name != 'NAN':
                                 master_data[key]["branch_name"] = b_name
                     except Exception:
                         continue
@@ -129,13 +127,11 @@ def main():
 
     print(f"Total unique college-branch records compiled: {len(result)}")
 
-    # Set average OC cutoff values
     for item in result:
         oc_data = item["communities"].get("OC")
         if oc_data:
             item["avg_oc_cutoff"] = oc_data["closing_cutoff"]
 
-    # Write chunk files (10,000 records per chunk)
     chunk_size = 10000
     chunks = [result[i:i + chunk_size] for i in range(0, len(result), chunk_size)]
     
