@@ -54,13 +54,11 @@ def main():
                     if not c_code or not c_name or 'college' in c_code.lower():
                         continue
 
-                    # Deduplicate rows to keep size small
                     row_key = f"{c_code}_{b_code}"
                     if row_key in seen:
                         continue
                     seen.add(row_key)
 
-                    # Lean structure without heavy redundant community blocks
                     result.append({
                         "college_code": c_code,
                         "college_name": c_name,
@@ -76,14 +74,27 @@ def main():
         except Exception as file_err:
             print(f"Error reading file {f}: {file_err}")
 
-    output_path = os.path.join('public', 'data.json')
+    print(f"Total extracted records without data loss: {len(result)}")
+
+    # Split into chunks of 10,000 records so each file is strictly under Cloudflare's 25 MiB limit
+    chunk_size = 10000
+    chunks = [result[i:i + chunk_size] for i in range(0, len(result), chunk_size)]
     
-    # Highly compressed JSON output to stay well under 25 MiB
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(result, f, separators=(',', ':'))
-        
-    file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"Successfully generated {output_path} with {len(result)} records. File size: {file_size_mb:.2f} MiB")
+    manifest = []
+    for idx, chunk in enumerate(chunks):
+        filename = f"data_part_{idx + 1}.json"
+        output_path = os.path.join('public', filename)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(chunk, f, separators=(',', ':'))
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        print(f"Saved {filename} with {len(chunk)} records ({size_mb:.2f} MiB)")
+        manifest.append(filename)
+
+    # Save manifest file pointing to all chunks
+    manifest_path = os.path.join('public', 'manifest.json')
+    with open(manifest_path, 'w', encoding='utf-8') as f:
+        json.dump(manifest, f)
+    print(f"Successfully generated manifest with {len(manifest)} parts.")
 
 if __name__ == '__main__':
     main()
