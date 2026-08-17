@@ -11,7 +11,6 @@ def main():
         os.remove(old_data_json)
 
     data_dir = 'data_processing'
-    # Sort files so Seat Matrix is processed first, Provisional second
     csv_files = sorted(glob.glob(os.path.join(data_dir, '*.csv')), key=lambda x: 'PROVISION' in x.upper())
     print(f"Ordered CSV files to process: {[os.path.basename(f) for f in csv_files]}")
     
@@ -29,10 +28,9 @@ def main():
             if len(df) == 0:
                 continue
             
-            df.columns = [str(c).strip().upper() for c in df.columns]
-            
             # --- CASE 1: PROVISIONAL ALLOTMENT FILE ---
             if 'PROVISION' in filename:
+                df.columns = [str(c).strip().upper() for c in df.columns]
                 c_col = next((c for c in ['COLLEGE CODE', 'INSTITUTE CODE', 'CODE'] if c in df.columns), None)
                 b_col = next((c for c in ['BRANCH CODE', 'COURSE CODE', 'BRANCH'] if c in df.columns), None)
                 comm_col = next((c for c in ['COMMUNITY', 'ALLOTTED COMMUNITY'] if c in df.columns), None)
@@ -40,7 +38,6 @@ def main():
                 rank_col = next((c for c in ['RANK'] if c in df.columns), None)
                 
                 if not c_col or not b_col:
-                    print(f"Warning: Missing required columns in {filename}. Skipping.")
                     continue
                     
                 for _, row in df.iterrows():
@@ -86,35 +83,44 @@ def main():
 
             # --- CASE 2: SEAT MATRIX FILE ---
             else:
-                c_col = next((c for c in ['CODE', 'COLLEGE CODE', 'S.NO'] if c in df.columns), None)
-                name_col = next((c for c in ['COLLEGE NAME', 'NAME'] if c in df.columns), None)
-                b_code_col = next((c for c in ['BRANCH', 'BRANCH CODE', 'COURSE'] if c in df.columns), None)
-                b_name_col = next((c for c in ['BRANCH NAME', 'COURSE NAME'] if c in df.columns), None)
-                
-                for _, row in df.iterrows():
+                # TNEA Seat Matrix typically has columns: CODE, COLLEGE NAME, BRANCH, BRANCH NAME (or similar index positions)
+                # Let's inspect raw columns, and if they are messy, fallback to positional parsing based on screenshot preview:
+                # Col 0: Code, Col 1: College Name, Col 2: Branch Code, Col 3: Branch Name
+                for idx, row in df.iterrows():
                     try:
-                        c_code = str(row[c_col]).strip() if c_col and pd.notna(row[c_col]) else ""
-                        c_name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else ""
-                        b_code = str(row[b_code_col]).strip() if b_code_col and pd.notna(row[b_code_col]) else ""
-                        b_name = str(row[b_name_col]).strip() if b_name_col and pd.notna(row[b_name_col]) else ""
+                        # Convert row values to string list
+                        vals = [str(val).strip() for val in row.values if pd.notna(val)]
+                        if len(vals) < 4:
+                            continue
                         
-                        if not c_code or 'COLLEGE' in c_code.upper() or c_code == 'NAN':
+                        # Look for numeric college code pattern or extract from specific columns
+                        potential_code = str(row.iloc[0]).strip()
+                        if not potential_code.isdigit():
+                            # Skip header rows
+                            continue
+                            
+                        c_code = potential_code
+                        c_name = str(row.iloc[1]).strip()
+                        b_code = str(row.iloc[2]).strip()
+                        b_name = str(row.iloc[3]).strip()
+                        
+                        if not c_code or c_code == 'nan' or not b_code or b_code == 'nan':
                             continue
                             
                         key = f"{c_code}_{b_code}"
                         if key not in master_data:
                             master_data[key] = {
                                 "college_code": c_code,
-                                "college_name": c_name if c_name else f"College {c_code}",
+                                "college_name": c_name if c_name and c_name != 'nan' else f"College {c_code}",
                                 "branch_code": b_code,
-                                "branch_name": b_name if b_name else f"Branch {b_code}",
+                                "branch_name": b_name if b_name and b_name != 'nan' else f"Branch {b_code}",
                                 "avg_oc_cutoff": 180.0,
                                 "communities": {}
                             }
                         else:
-                            if c_name and c_name != 'NAN':
+                            if c_name and c_name != 'nan':
                                 master_data[key]["college_name"] = c_name
-                            if b_name and b_name != 'NAN':
+                            if b_name and b_name != 'nan':
                                 master_data[key]["branch_name"] = b_name
                     except Exception:
                         continue
