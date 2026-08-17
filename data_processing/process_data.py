@@ -6,7 +6,7 @@ import pandas as pd
 SEAT_MATRIX_FILE = (
     "GENERAL_ACADEMIC_SEAT_MATRIX_BEFORE_SPECIAL_RESERVATION_COUNSELLING_2026.csv"
 )
-PROVISIONAL_FILE = "PROVSION ROUND 1.csv"
+PROVISIONAL_FILE = "PROVSION ROUND 1.csv"  # Merged R1 + R2 provisional CSV
 OUTPUT_JSON = "../public/data.json"
 
 # 1. Read CSV files and normalize column names
@@ -21,14 +21,19 @@ df_prov = df_prov.dropna(how="all")
 
 # 2. Standardize data types and clean whitespace
 for col in ["COLLEGE CODE", "BRANCH CODE"]:
-    df_seat[col] = df_seat[col].astype(str).str.strip()
-    df_prov[col] = df_prov[col].astype(str).str.strip()
+    if col in df_seat.columns:
+        df_seat[col] = df_seat[col].astype(str).str.strip()
+    if col in df_prov.columns:
+        df_prov[col] = df_prov[col].astype(str).str.strip()
 
-df_seat["COLLEGE NAME"] = df_seat["COLLEGE NAME"].astype(str).str.strip()
-df_seat["BRANCH NAME"] = df_seat["BRANCH NAME"].astype(str).str.strip()
-df_prov["ALLOTTED COMMUNITY"] = (
-    df_prov["ALLOTTED COMMUNITY"].astype(str).str.strip()
-)
+if "COLLEGE NAME" in df_seat.columns:
+    df_seat["COLLEGE NAME"] = df_seat["COLLEGE NAME"].astype(str).str.strip()
+if "BRANCH NAME" in df_seat.columns:
+    df_seat["BRANCH NAME"] = df_seat["BRANCH NAME"].astype(str).str.strip()
+if "ALLOTTED COMMUNITY" in df_prov.columns:
+    df_prov["ALLOTTED COMMUNITY"] = (
+        df_prov["ALLOTTED COMMUNITY"].astype(str).str.strip()
+    )
 
 df_prov["RANK"] = pd.to_numeric(df_prov["RANK"], errors="coerce")
 df_prov["AGGREGATE MARK"] = pd.to_numeric(
@@ -75,12 +80,13 @@ for _, row in df_seat.iterrows():
 
         valid_allotted = comm_allotted.dropna(
             subset=["RANK", "AGGREGATE MARK"]
-        ).sort_values(by="RANK")
+        )
 
         if not valid_allotted.empty:
-            last_student = valid_allotted.iloc[-1]
-            closing_rank = int(last_student["RANK"])
-            closing_cutoff = round(float(last_student["AGGREGATE MARK"]), 2)
+            # Closing rank is the maximum rank number admitted (last person in)
+            closing_rank = int(valid_allotted["RANK"].max())
+            # Closing cutoff is the minimum aggregate mark among admitted candidates
+            closing_cutoff = round(float(valid_allotted["AGGREGATE MARK"].min()), 2)
         else:
             closing_rank = None
             closing_cutoff = None
