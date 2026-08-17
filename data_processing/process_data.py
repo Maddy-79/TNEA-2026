@@ -24,7 +24,8 @@ def main():
         filename = os.path.basename(f).upper()
         print(f"Processing file: {filename}")
         try:
-            df = pd.read_csv(f, encoding='utf-8', errors='ignore', on_bad_lines='skip')
+            # Fixed: removed unsupported 'errors' keyword argument
+            df = pd.read_csv(f, encoding='utf-8', on_bad_lines='skip')
             print(f"Rows found: {len(df)}")
             if len(df) == 0:
                 continue
