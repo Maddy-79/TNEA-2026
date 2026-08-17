@@ -1,18 +1,1 @@
-[
-  {
-    "college_code": "1",
-    "college_name": "Anna University",
-    "branch_code": "CS",
-    "branch_name": "COMPUTER SCIENCE",
-    "avg_oc_cutoff": 200.0,
-    "communities": {
-      "OC": {
-        "closing_rank": 1,
-        "closing_cutoff": 200.0,
-        "filled": 10,
-        "total": 10,
-        "fill_pct": 100.0
-      }
-    }
-  }
-]
+[]
