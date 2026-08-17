@@ -6,66 +6,78 @@ import pandas as pd
 def main():
     os.makedirs('public', exist_ok=True)
     data_dir = 'data_processing'
+    csv_files = glob.glob(os.path.join(data_dir, '*.csv'))
+    print(f"Found CSV files: {csv_files}")
     
-    # Safe default fallback data incase of any formatting issues
-    result = [{
-        "college_code": "1",
-        "college_name": "Anna University Chennai",
-        "branch_code": "CS",
-        "branch_name": "COMPUTER SCIENCE AND ENGINEERING",
-        "avg_oc_cutoff": 200.0,
-        "communities": {
-            "OC": {"closing_rank": 1, "closing_cutoff": 200.0, "filled": 10, "total": 10, "fill_pct": 100.0},
-            "BC": {"closing_rank": 2, "closing_cutoff": 198.0, "filled": 10, "total": 10, "fill_pct": 100.0}
-        }
-    }]
+    if not csv_files:
+        print("No CSV files found.")
+        return
 
-    try:
-        csv_files = glob.glob(os.path.join(data_dir, '*.csv'))
-        print(f"Found CSV files: {csv_files}")
+    # Automatically pick the largest/main CSV file (your merged data)
+    main_csv = max(csv_files, key=os.path.getsize)
+    print(f"Processing main CSV: {main_csv}")
+    
+    df = pd.read_csv(main_csv, encoding='utf-8', errors='ignore')
+    df.columns = [str(c).strip() for c in df.columns]
+    print(f"Total rows in CSV to process: {len(df)}")
+
+    result = []
+    for idx, row in df.iterrows():
+        def get_val(keys, default, pos=None):
+            for k in keys:
+                if k in df.columns and pd.notna(row[k]):
+                    return row[k]
+            if pos is not None and len(row) > pos and pd.notna(row.iloc[pos]):
+                return row.iloc[pos]
+            return default
+
+        c_code = str(get_val(['College Code', 'COLLEGE_CODE', 'CollegeCode', 'Code'], idx, 0))
+        c_name = str(get_val(['College Name', 'COLLEGE_NAME', 'CollegeName', 'Name'], 'Unknown College', 1))
+        b_code = str(get_val(['Branch Code', 'BRANCH_CODE', 'BranchCode'], '000', 2))
+        b_name = str(get_val(['Branch Name', 'BRANCH_NAME', 'BranchName'], 'Branch', 3))
         
-        if csv_files:
-            df_list = []
-            for f in csv_files:
-                try:
-                    df_temp = pd.read_csv(f, encoding='utf-8', errors='ignore')
-                    df_list.append(df_temp)
-                except Exception as e:
-                    print(f"Skipping file {f} due to error: {e}")
+        communities = {}
+        for comm in ['OC', 'BC', 'BCM', 'MBC', 'SC', 'SCA', 'ST']:
+            rank = get_val([f'{comm}_Rank', f'{comm} Rank', comm], 1000)
+            cutoff = get_val([f'{comm}_Cutoff', f'{comm} Cutoff', 'Cutoff'], 190.0)
             
-            if df_list:
-                df = df_list[0]
-                df.columns = [str(c).strip() for c in df.columns]
-                print(f"Successfully read columns: {df.columns.tolist()[:5]}...")
+            try:
+                r_int = int(float(str(rank).replace(',', '')))
+            except:
+                r_int = 1000
                 
-                parsed_result = []
-                for idx, row in df.iterrows():
-                    # Safely map columns using position or name lookup
-                    c_code = str(row.iloc[0] if len(row) > 0 else "1")
-                    c_name = str(row.iloc[1] if len(row) > 1 else "Unknown College")
-                    b_code = str(row.iloc[2] if len(row) > 2 else "001")
-                    b_name = str(row.iloc[3] if len(row) > 3 else "Unknown Branch")
-                    
-                    parsed_result.append({
-                        "college_code": c_code,
-                        "college_name": c_name,
-                        "branch_code": b_code,
-                        "branch_name": b_name,
-                        "avg_oc_cutoff": 190.0,
-                        "communities": {
-                            "OC": {"closing_rank": 100 + idx, "closing_cutoff": 190.0, "filled": 10, "total": 10, "fill_pct": 100.0}
-                        }
-                    })
-                if parsed_result:
-                    result = parsed_result
-                    print(f"Parsed {len(result)} rows successfully.")
-    except Exception as ex:
-        print(f"Handled exception during processing: {ex}")
+            try:
+                c_float = float(str(cutoff).replace(',', ''))
+            except:
+                c_float = 190.0
+            
+            communities[comm] = {
+                "closing_rank": r_int,
+                "closing_cutoff": c_float,
+                "filled": 10,
+                "total": 10,
+                "fill_pct": 100.0
+            }
+
+        avg_oc = get_val(['Avg_OC', 'AVG_OC', 'Cutoff'], 190.0)
+        try:
+            avg_val = float(str(avg_oc).replace(',', ''))
+        except:
+            avg_val = 190.0
+
+        result.append({
+            "college_code": c_code,
+            "college_name": c_name,
+            "branch_code": b_code,
+            "branch_name": b_name,
+            "avg_oc_cutoff": avg_val,
+            "communities": communities
+        })
 
     output_path = os.path.join('public', 'data.json')
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2)
-    print(f"Successfully generated {output_path}")
+    print(f"Successfully generated {output_path} with {len(result)} records.")
 
 if __name__ == '__main__':
     main()
