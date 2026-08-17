@@ -30,19 +30,31 @@ if (roundSelect) {
   });
 }
 
-// 1. Fetch Data
+// 1. Fetch Data via Manifest Chunks (Zero Data Loss)
 async function loadData() {
   try {
-    const res = await fetch("data.json");
-    allData = await res.json();
+    const manifestRes = await fetch("manifest.json");
+    const partFiles = await manifestRes.json();
+    
+    allData = [];
+    for (const file of partFiles) {
+      const partRes = await fetch(file);
+      const partData = await partRes.json();
+      allData = allData.concat(partData);
+    }
+    
+    console.log(`Successfully loaded all ${allData.length} records from chunks!`);
     setupDropdowns();
     updateTableHeader();
     renderTable();
     updateChoiceUI();
   } catch (err) {
-    console.error("Error loading data.json:", err);
+    console.error("Error loading data chunks via manifest.json:", err);
   }
 }
+
+// Call loadData on startup
+loadData();
 
 // 2. Community Pill Logic (Max 2)
 document.querySelectorAll(".comm-pill").forEach(pill => {
@@ -443,6 +455,7 @@ function saveChoices() {
 function updateChoiceUI() {
   choiceCount.textContent = choiceList.length;
   const container = document.getElementById("choiceListContainer");
+  if (!container) return;
   container.innerHTML = "";
 
   choiceList.forEach((item, index) => {
@@ -506,156 +519,102 @@ window.removeChoice = function(index) {
 };
 
 // Drawer controls
-document.getElementById("openChoiceBtn").addEventListener("click", () => {
-  document.getElementById("choiceDrawer").classList.remove("hidden");
-  document.getElementById("drawerOverlay").classList.remove("hidden");
-});
+const openChoiceBtn = document.getElementById("openChoiceBtn");
+if (openChoiceBtn) {
+  openChoiceBtn.addEventListener("click", () => {
+    document.getElementById("choiceDrawer").classList.remove("hidden");
+    document.getElementById("drawerOverlay").classList.remove("hidden");
+  });
+}
 const closeDrawer = () => {
   document.getElementById("choiceDrawer").classList.add("hidden");
   document.getElementById("drawerOverlay").classList.add("hidden");
 };
-document.getElementById("closeChoiceBtn").addEventListener("click", closeDrawer);
-document.getElementById("drawerOverlay").addEventListener("click", closeDrawer);
+const closeChoiceBtn = document.getElementById("closeChoiceBtn");
+if (closeChoiceBtn) closeChoiceBtn.addEventListener("click", closeDrawer);
+const drawerOverlay = document.getElementById("drawerOverlay");
+if (drawerOverlay) drawerOverlay.addEventListener("click", closeDrawer);
 
-document.getElementById("clearChoicesBtn").addEventListener("click", () => {
-  choiceList = [];
-  saveChoices();
-  updateChoiceUI();
-});
+const clearChoicesBtn = document.getElementById("clearChoicesBtn");
+if (clearChoicesBtn) {
+  clearChoicesBtn.addEventListener("click", () => {
+    choiceList = [];
+    saveChoices();
+    updateChoiceUI();
+  });
+}
 
 // CSV Export
-document.getElementById("exportCsvBtn").addEventListener("click", () => {
-  let csv = "Choice Number,College Code,College Name,Branch Code,Branch Name,Avg OC Cutoff,OC Rank,OC Cutoff,Extra Community,Extra Rank,Extra Cutoff\n";
-  choiceList.forEach((item, idx) => {
-    csv += `${idx + 1},${item.college_code},"${item.college_name}",${item.branch_code},"${item.branch_name}",${item.avg_oc_cutoff},${item.oc_rank},${item.oc_cutoff},${item.extra_comm || ''},${item.extra_rank || ''},${item.extra_cutoff || ''}\n`;
+const exportCsvBtn = document.getElementById("exportCsvBtn");
+if (exportCsvBtn) {
+  exportCsvBtn.addEventListener("click", () => {
+    let csv = "Choice Number,College Code,College Name,Branch Code,Branch Name,Avg OC Cutoff,OC Rank,OC Cutoff,Extra Community,Extra Rank,Extra Cutoff\n";
+    choiceList.forEach((item, idx) => {
+      csv += `${idx + 1},${item.college_code},"${item.college_name}",${item.branch_code},"${item.branch_name}",${item.avg_oc_cutoff},${item.oc_rank},${item.oc_cutoff},${item.extra_comm || ''},${item.extra_rank || ''},${item.extra_cutoff || ''}\n`;
+    });
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "TNEA_Choice_List.csv";
+    a.click();
   });
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "TNEA_Choice_List.csv";
-  a.click();
-});
+}
 
 // PDF Export
-document.getElementById("exportPdfBtn").addEventListener("click", () => {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF("landscape");
+const exportPdfBtn = document.getElementById("exportPdfBtn");
+if (exportPdfBtn) {
+  exportPdfBtn.addEventListener("click", () => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF("landscape");
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text("TNEA 2026 - Preferred Choice List", 14, 15);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("TNEA 2026 - Preferred Choice List", 14, 15);
 
-  const tableHeaders = ["S.No", "Code", "College Name", "Branch", "Avg OC Cutoff", "Closing Ranks"];
-  const tableRows = [];
+    const tableHeaders = ["S.No", "Code", "College Name", "Branch", "Avg OC Cutoff", "Closing Ranks"];
+    const tableRows = [];
 
-  choiceList.forEach((item, idx) => {
-    let rankStr = `OC: ${item.oc_rank} (${item.oc_cutoff})`;
-    if (item.extra_comm) {
-      rankStr += `\n${item.extra_comm}: ${item.extra_rank} (${item.extra_cutoff})`;
-    }
+    choiceList.forEach((item, idx) => {
+      let rankStr = `OC: ${item.oc_rank} (${item.oc_cutoff})`;
+      if (item.extra_comm) {
+        rankStr += `\n${item.extra_comm}: ${item.extra_rank} (${item.extra_cutoff})`;
+      }
 
-    tableRows.push([
-      idx + 1,
-      item.college_code,
-      item.college_name,
-      `${item.branch_name} (${item.branch_code})`,
-      item.avg_oc_cutoff,
-      rankStr
-    ]);
+      tableRows.push([
+        idx + 1,
+        item.college_code,
+        item.college_name,
+        `${item.branch_name} (${item.branch_code})`,
+        item.avg_oc_cutoff,
+        rankStr
+      ]);
+    });
+
+    doc.autoTable({
+      startY: 22,
+      head: [tableHeaders],
+      body: tableRows,
+      theme: "grid",
+      headStyles: { fillColor: [79, 70, 229] },
+      styles: { fontSize: 9, cellPadding: 5 }
+    });
+
+    doc.save("TNEA_Choice_List.pdf");
   });
-
-  doc.autoTable({
-    startY: 22,
-    head: [tableHeaders],
-    body: tableRows,
-    theme: "grid",
-    headStyles: { fillColor: [79, 70, 229] },
-    styles: { fontSize: 9, cellPadding: 5 }
-  });
-
-  doc.save("TNEA_Choice_List.pdf");
-});
+}
 
 // Save JSON Backup
-document.getElementById("saveJsonBtn").addEventListener("click", () => {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(choiceList, null, 2));
-  const dlAnchor = document.createElement('a');
-  dlAnchor.setAttribute("href", dataStr);
-  dlAnchor.setAttribute("download", "tnea_choices_backup.json");
-  dlAnchor.click();
-});
+const saveJsonBtn = document.getElementById("saveJsonBtn");
+if (saveJsonBtn) {
+  saveJsonBtn.addEventListener("click", () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(choiceList, null, 2));
+    const dlAnchor = document.createElement('a');
+    dlAnchor.setAttribute("href", dataStr);
+    dlAnchor.setAttribute("download", "tnea_choices_backup.json");
+    dlAnchor.click();
+  });
+}
 
 // Load JSON/CSV Button Trigger
 const importFileInput = document.getElementById("importFileInput");
-document.getElementById("loadJsonBtn").addEventListener("click", () => {
-  importFileInput.click();
-});
-
-importFileInput.addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = function(event) {
-    const content = event.target.result;
-    if (file.name.endsWith(".json")) {
-      try {
-        const parsed = JSON.parse(content);
-        if (Array.isArray(parsed)) {
-          choiceList = parsed;
-          saveChoices();
-          updateChoiceUI();
-          alert("Choice list successfully loaded from JSON!");
-        }
-      } catch (err) {
-        alert("Invalid JSON file format.");
-      }
-    } else if (file.name.endsWith(".csv")) {
-      try {
-        const lines = content.split("\n").filter(l => l.trim() !== "");
-        const newChoices = [];
-        for (let i = 1; i < lines.length; i++) {
-          const row = [];
-          let inQuotes = false;
-          let entry = "";
-          for (let char of lines[i]) {
-            if (char === '"') { inQuotes = !inQuotes; }
-            else if (char === ',' && !inQuotes) { row.push(entry); entry = ""; }
-            else { entry += char; }
-          }
-          row.push(entry);
-
-          if (row.length >= 8) {
-            newChoices.push({
-              college_code: row[1],
-              college_name: row[2],
-              branch_code: row[3],
-              branch_name: row[4],
-              avg_oc_cutoff: row[5],
-              oc_rank: row[6],
-              oc_cutoff: row[7],
-              extra_comm: row[8] || null,
-              extra_rank: row[9] || null,
-              extra_cutoff: row[10] || null
-            });
-          }
-        }
-        if (newChoices.length > 0) {
-          choiceList = newChoices;
-          saveChoices();
-          updateChoiceUI();
-          alert("Choice list successfully loaded from CSV!");
-        } else {
-          alert("No valid choice rows found in CSV.");
-        }
-      } catch (err) {
-        alert("Error parsing CSV file.");
-      }
-    }
-    importFileInput.value = "";
-  };
-  reader.readAsText(file);
-});
-
-loadData();
