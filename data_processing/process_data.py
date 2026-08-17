@@ -76,7 +76,7 @@ def main():
 
     print(f"Total extracted records without data loss: {len(result)}")
 
-    # Split into chunks of 10,000 records so each file is strictly under Cloudflare's 25 MiB limit
+    # Split into chunks of 10,000 records to stay safely under Cloudflare's 25 MiB limit
     chunk_size = 10000
     chunks = [result[i:i + chunk_size] for i in range(0, len(result), chunk_size)]
     
@@ -90,7 +90,6 @@ def main():
         print(f"Saved {filename} with {len(chunk)} records ({size_mb:.2f} MiB)")
         manifest.append(filename)
 
-    # Save manifest file pointing to all chunks
     manifest_path = os.path.join('public', 'manifest.json')
     with open(manifest_path, 'w', encoding='utf-8') as f:
         json.dump(manifest, f)
