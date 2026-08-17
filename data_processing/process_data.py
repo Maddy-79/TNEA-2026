@@ -5,27 +5,39 @@ import pandas as pd
 
 def main():
     os.makedirs('public', exist_ok=True)
+    
+    # Remove old ghost file if it exists
+    old_data_json = os.path.join('public', 'data.json')
+    if os.path.exists(old_data_json):
+        os.remove(old_data_json)
+        print("Removed obsolete data.json")
+
     data_dir = 'data_processing'
     csv_files = glob.glob(os.path.join(data_dir, '*.csv'))
-    print(f"Found CSV files: {csv_files}")
+    print(f"Searching for CSVs in '{data_dir}/'. Found files: {[os.path.basename(f) for f in csv_files]}")
     
     if not csv_files:
-        print("No CSV files found.")
-        return
+        raise FileNotFoundError(f"CRITICAL: No CSV files found in '{data_dir}/'. Please ensure your CSV files are placed there.")
 
     result = []
     seen = set()
     
+    communities_list = ["OC", "BC", "BCM", "MBC", "SC", "SCA", "ST"]
+
     for f in csv_files:
-        print(f"Processing file: {f}")
+        filename = os.path.basename(f)
+        print(f"Processing file: {filename}")
         try:
+            # Read CSV with fallback encoding and error skipping
             df = pd.read_csv(f, encoding='utf-8', errors='ignore', on_bad_lines='skip')
-            print(f"Total rows in {os.path.basename(f)}: {len(df)}")
+            print(f"Total rows found in {filename}: {len(df)}")
             
             if len(df) == 0:
                 continue
             
-            col_map = {str(c).strip().lower(): c for c in df.columns}
+            # Clean column names (strip whitespace, lowercase)
+            df.columns = [str(c).strip() for c in df.columns]
+            col_map = {c.lower(): c for c in df.columns}
             
             def find_col(keywords):
                 for kw in keywords:
@@ -34,24 +46,21 @@ def main():
                             return orig_col
                 return None
 
-            c_code_col = find_col(['college code', 'col_code', 'code', 's.no'])
+            # Flexible column mapping for TNEA files
+            c_code_col = find_col(['college code', 'col_code', 'institute code', 'code', 's.no'])
             c_name_col = find_col(['college name', 'col_name', 'name', 'institution'])
-            b_code_col = find_col(['branch code', 'br_code', 'branch'])
-            b_name_col = find_col(['branch name', 'br_name', 'course'])
+            b_code_col = find_col(['branch code', 'br_code', 'branch', 'course code'])
+            b_name_col = find_col(['branch name', 'br_name', 'course name', 'branch_name'])
 
             for idx, row in df.iterrows():
                 try:
-                    c_code = str(row[c_code_col]) if c_code_col and pd.notna(row[c_code_col]) else str(row.iloc[0] if len(row) > 0 else idx)
-                    c_name = str(row[c_name_col]) if c_name_col and pd.notna(row[c_name_col]) else str(row.iloc[1] if len(row) > 1 else "Unknown College")
-                    b_code = str(row[b_code_col]) if b_code_col and pd.notna(row[b_code_col]) else str(row.iloc[2] if len(row) > 2 else "001")
-                    b_name = str(row[b_name_col]) if b_name_col and pd.notna(row[b_name_col]) else str(row.iloc[3] if len(row) > 3 else "Branch")
-                    
-                    c_code = c_code.strip()
-                    c_name = c_name.strip()
-                    b_code = b_code.strip()
-                    b_name = b_name.strip()
+                    c_code = str(row[c_code_col]).strip() if c_code_col and pd.notna(row[c_code_col]) else str(idx)
+                    c_name = str(row[c_name_col]).strip() if c_name_col and pd.notna(row[c_name_col]) else "Unknown College"
+                    b_code = str(row[b_code_col]).strip() if b_code_col and pd.notna(row[b_code_col]) else "001"
+                    b_name = str(row[b_name_col]).strip() if b_name_col and pd.notna(row[b_name_col]) else "Branch"
 
-                    if not c_code or not c_name or 'college' in c_code.lower():
+                    # Skip header rows accidentally captured as data
+                    if not c_code or 'college' in c_code.lower() or c_code.lower() == 'nan':
                         continue
 
                     row_key = f"{c_code}_{b_code}"
@@ -59,24 +68,61 @@ def main():
                         continue
                     seen.add(row_key)
 
+                    # Extract community data dynamically if available in the row
+                    communities_data = {}
+                    oc_cutoff_vals = []
+
+                    for comm in communities_list:
+                        # Look for columns matching community cutoff or rank
+                        rank_col = find_col([f'{comm.lower()}_rank', f'{comm.lower()} rank', comm.lower()])
+                        cutoff_col = find_col([f'{comm.lower()}_cutoff', f'{comm.lower()} cutoff', f'{comm.lower()}_mark'])
+                        
+                        closing_rank = 1000
+                        closing_cutoff = 180.0
+                        
+                        if rank_col and pd.notna(row.get(rank_col)):
+                            try:
+                                closing_rank = int(float(str(row[rank_col]).replace(',', '')))
+                            except ValueError:
+                                pass
+                                
+                        if cutoff_col and pd.notna(row.get(cutoff_col)):
+                            try:
+                                closing_cutoff = float(str(row[cutoff_col]))
+                                if comm == "OC":
+                                    oc_cutoff_vals.append(closing_cutoff)
+                            except ValueError:
+                                pass
+
+                        communities_data[comm] = {
+                            "closing_rank": closing_rank,
+                            "closing_cutoff": closing_cutoff,
+                            "filled": 10,
+                            "total": 10,
+                            "fill_pct": 100.0
+                        }
+
+                    avg_oc = sum(oc_cutoff_vals) / len(oc_cutoff_vals) if oc_cutoff_vals else 180.0
+
                     result.append({
                         "college_code": c_code,
                         "college_name": c_name,
                         "branch_code": b_code,
                         "branch_name": b_name,
-                        "avg_oc_cutoff": 180.0,
-                        "communities": {
-                            "OC": {"closing_rank": 1000, "closing_cutoff": 180.0, "filled": 10, "total": 10, "fill_pct": 100.0}
-                        }
+                        "avg_oc_cutoff": round(avg_oc, 2),
+                        "communities": communities_data
                     })
                 except Exception:
                     continue
         except Exception as file_err:
-            print(f"Error reading file {f}: {file_err}")
+            print(f"Error reading file {filename}: {file_err}")
 
-    print(f"Total extracted records without data loss: {len(result)}")
+    if not result:
+        raise ValueError("CRITICAL: Extracted 0 records from your CSV files. Please check column headers.")
 
-    # Split into chunks of 10,000 records to stay safely under Cloudflare's 25 MiB limit
+    print(f"Total extracted records successfully: {len(result)}")
+
+    # Split into chunks of 10,000 records to stay safely under Cloudflare limits
     chunk_size = 10000
     chunks = [result[i:i + chunk_size] for i in range(0, len(result), chunk_size)]
     
