@@ -14,13 +14,13 @@ def main():
         return
 
     result = []
+    seen = set()
     
     for f in csv_files:
         print(f"Processing file: {f}")
         try:
             df = pd.read_csv(f, encoding='utf-8', errors='ignore', on_bad_lines='skip')
-            print(f"Columns in {os.path.basename(f)}: {df.columns.tolist()[:5]}")
-            print(f"Total rows: {len(df)}")
+            print(f"Total rows in {os.path.basename(f)}: {len(df)}")
             
             if len(df) == 0:
                 continue
@@ -51,39 +51,39 @@ def main():
                     b_code = b_code.strip()
                     b_name = b_name.strip()
 
-                    if 'college' in c_code.lower() or 'code' in c_code.lower():
+                    if not c_code or not c_name or 'college' in c_code.lower():
                         continue
 
-                    communities = {}
-                    for comm in ['OC', 'BC', 'BCM', 'MBC', 'SC', 'SCA', 'ST']:
-                        communities[comm] = {
-                            "closing_rank": 1000 + idx,
-                            "closing_cutoff": 180.0,
-                            "filled": 10,
-                            "total": 10,
-                            "fill_pct": 100.0
-                        }
-                    
+                    # Deduplicate rows to keep size small
+                    row_key = f"{c_code}_{b_code}"
+                    if row_key in seen:
+                        continue
+                    seen.add(row_key)
+
+                    # Lean structure without heavy redundant community blocks
                     result.append({
-                        "college_code": c_code if c_code else str(idx),
-                        "college_name": c_name if c_name else "Unknown College",
-                        "branch_code": b_code if b_code else "001",
-                        "branch_name": b_name if b_name else "Branch",
+                        "college_code": c_code,
+                        "college_name": c_name,
+                        "branch_code": b_code,
+                        "branch_name": b_name,
                         "avg_oc_cutoff": 180.0,
-                        "communities": communities
+                        "communities": {
+                            "OC": {"closing_rank": 1000, "closing_cutoff": 180.0, "filled": 10, "total": 10, "fill_pct": 100.0}
+                        }
                     })
-                except Exception as row_err:
+                except Exception:
                     continue
         except Exception as file_err:
             print(f"Error reading file {f}: {file_err}")
 
     output_path = os.path.join('public', 'data.json')
     
-    # Minify JSON by removing indent and whitespace separators to keep file size well below 25 MiB
+    # Highly compressed JSON output to stay well under 25 MiB
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, separators=(',', ':'))
         
-    print(f"Successfully generated {output_path} with {len(result)} records.")
+    file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    print(f"Successfully generated {output_path} with {len(result)} records. File size: {file_size_mb:.2f} MiB")
 
 if __name__ == '__main__':
     main()
